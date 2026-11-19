@@ -113,16 +113,33 @@ func claudeCatalog(ctx context.Context, inv Invocation) (ModelList, error) {
 	return models.list(), nil
 }
 
-// The native picker puts the concrete version in its description, while the
-// display name is only a family label. This formatting never selects a model.
+// claudeModelLabel formats a Claude catalog entry for display. Native family
+// aliases put the concrete version in description (for example "Opus" with
+// "Opus 5.5 · ..."), while gateway-discovered entries put the model name in
+// displayName and routing or account metadata in description. Keeping
+// displayName unless the description summary already refines it preserves both.
+// This formatting never selects a model.
 func claudeModelLabel(entry claudeCatalogModel) string {
 	label := strings.TrimSpace(entry.DisplayName)
 	summary, _, _ := strings.Cut(strings.TrimSpace(entry.Description), " · ")
+	summary = strings.TrimSpace(summary)
 	if summary == "" {
 		return label
 	}
-	if entry.Value == "default" && label != "" {
-		return label + " · " + summary
+	if label == "" || claudeSummaryRefinesLabel(label, summary) {
+		return summary
 	}
-	return summary
+	if claudeSummaryRefinesLabel(summary, label) {
+		return label
+	}
+	return label + " · " + summary
+}
+
+// claudeSummaryRefinesLabel reports whether summary already starts with label
+// as a whole leading token, such as "Opus 5.5" refining "Opus".
+func claudeSummaryRefinesLabel(label, summary string) bool {
+	if len(summary) < len(label) || !strings.EqualFold(summary[:len(label)], label) {
+		return false
+	}
+	return len(summary) == len(label) || summary[len(label)] == ' '
 }

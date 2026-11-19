@@ -121,7 +121,7 @@ func TestClaudeCatalogPreservesNativeChoicesAndVersions(t *testing.T) {
 	}
 	wantIDs := []string{"default", "opus", "claude-fable-5-1[1m]", "sonnet", "custom-future", "no-description", "resolved-only",
 		"claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5-5", "organization-model"}
-	wantLabels := []string{"Default (recommended) · Use the default model (currently Opus 5.5)", "Opus 5.5", "Fable 5.1", "Sonnet 5.5", "Organization 42", "Fallback", "Resolved only",
+	wantLabels := []string{"Default (recommended) · Use the default model (currently Opus 5.5)", "Opus 5.5", "Fable 5.1", "Sonnet 5.5", "Custom · Organization 42", "Fallback", "Resolved only",
 		"claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5-5", "organization-model"}
 	if !reflect.DeepEqual(ids, wantIDs) || !reflect.DeepEqual(labels, wantLabels) {
 		t.Fatalf("models = %+v", list.Models)
@@ -146,5 +146,36 @@ func TestClaudeCatalogPreservesNativeChoicesAndVersions(t *testing.T) {
 	// declares them, even when the default alias resolving to it does not.
 	if pinned := list.Models[7]; pinned.Default || pinned.Effort == nil || len(pinned.Effort.Options) != 2 {
 		t.Fatalf("concrete choice = %+v", pinned)
+	}
+}
+
+func TestClaudeCatalogPreservesGatewayDisplayNames(t *testing.T) {
+	list, err := DiscoverModels(context.Background(), "claude", fixtureInvocation(t, "claude-catalog", map[string]string{
+		"FIXTURE_MODELS": `[
+   {"value":"auto/deepseek[1m]","resolvedModel":"auto/deepseek[1m]","displayName":"DeepSeek Flash · routing group","description":"via gateway"},
+   {"value":"cursor/grok@500k","resolvedModel":"cursor/grok@500k","displayName":"Grok @ 500k · Cursor","description":"user@example.com · via gateway"},
+   {"value":"desc-only","resolvedModel":"desc-only","displayName":"","description":"Opus 5.5 · Best"},
+   {"value":"exact-dup","resolvedModel":"exact-dup","displayName":"Opus 5.5","description":"Opus 5.5 · Best"},
+   {"value":"label-refines","resolvedModel":"label-refines","displayName":"Opus 5.5 · Sub2API","description":"Opus 5.5 · Best"},
+   {"value":"prefix-trap","resolvedModel":"prefix-trap","displayName":"Pro","description":"Provider · via gateway"}
+  ]`,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, model := range list.Models {
+		got = append(got, model.Label)
+	}
+	want := []string{
+		"DeepSeek Flash · routing group · via gateway",
+		"Grok @ 500k · Cursor · user@example.com",
+		"Opus 5.5",
+		"Opus 5.5",
+		"Opus 5.5 · Sub2API",
+		"Pro · Provider",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("labels = %q, want %q", got, want)
 	}
 }
