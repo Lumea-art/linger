@@ -60,6 +60,6 @@ Mail `--markdown` is converted to HTML by TeamHub; only `--attach` adds attachme
 
 GitHub reads the connected account, its repositories, issues and pull requests at once; `github comment` and `github create-issue` wait for the sponsor's confirmation card.
 
-Other Connected Apps (such as Canva or Linear) have no dedicated commands and are called through `teamhub apps search/execute`.
+Other Connected Apps (such as Canva or Linear) have no dedicated commands and are called through `teamhub apps search/execute`. TeamHub runs the tools it knows as reads at once, including Linear's list, get and search tools and a `LINEAR_RUN_QUERY_OR_MUTATION` document that declares only queries; every other call waits for the sponsor's confirmation card.
 
 `teamhub apps connect <app-key>` asks for access to any Connected App that supports Agent tools; without an authorized account it posts an authorization card in the current chat. `teamhub apps auto-reminders list|set` lists or toggles automatic reminders for the Sponsor's own connections.
