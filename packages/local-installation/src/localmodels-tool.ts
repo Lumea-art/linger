@@ -527,9 +527,10 @@ export async function runLocalmodels(
  * the gateway the tool started (`stack down`), the library's Bifrost
  * included. An uninstall or an install over this release stops all of it; a
  * quit keeps the controller, which belongs to the services that keep
- * running. Nothing is downloaded: a home without that kit has nothing it
- * started. Every step runs even when an earlier one fails; the error names
- * each that did not stop.
+ * running. Nothing is downloaded. An absent pinned kit is skipped; a pinned
+ * kit that is present but fails verification is reported as a stop failure.
+ * Every stop command runs even when an earlier command fails; the error
+ * names each that did not stop.
  */
 export async function stopLocalmodels(
   home: string,
@@ -628,9 +629,15 @@ async function hasPinnedTool(home: string): Promise<boolean> {
   if (configuredDevTool()) return true;
   const source = pinnedToolSource();
   if (!source) return false;
-  return !!(await installedKit(kitDirectory(home, source), source).catch(
-    () => undefined,
-  ));
+  const tool = await installedKit(kitDirectory(home, source), source).catch(
+    (cause: unknown) => {
+      throw new Error(
+        "Cannot stop local models: the installed tool kit could not be verified. Start Linger to repair the kit, then try again.",
+        { cause },
+      );
+    },
+  );
+  return tool !== undefined;
 }
 /**
  * The kit this release pins, from the installer's published metadata

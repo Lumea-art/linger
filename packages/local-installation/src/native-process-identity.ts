@@ -30,7 +30,11 @@ function runProcess(
       },
       (error, stdout) => {
         if (error && error.code !== 1)
-          reject(new Error("Native process identity could not be inspected."));
+          reject(
+            new Error("Native process identity could not be inspected.", {
+              cause: error,
+            }),
+          );
         else resolve({ code: error ? 1 : 0, stdout });
       },
     );
@@ -44,12 +48,44 @@ function runProcess(
 // process tree.
 const WINDOWS_PROCESSES = String.raw`
 $ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Net;
+using System.Runtime.InteropServices;
+public static class LingerTcpListeners {
+  [DllImport("iphlpapi.dll")]
+  static extern uint GetExtendedTcpTable(IntPtr table, ref int size, bool order, int family, int tableClass, uint reserved);
+  public sealed class Listener { public string a; public int t; public int o; }
+  public static Listener[] Read() {
+    int size = 0;
+    uint status = GetExtendedTcpTable(IntPtr.Zero, ref size, false, 2, 3, 0);
+    if (status != 122) throw new InvalidOperationException("TCP table size: " + status);
+    for (int attempt = 0; attempt < 3; attempt++) {
+      IntPtr buffer = Marshal.AllocHGlobal(size);
+      try {
+        status = GetExtendedTcpTable(buffer, ref size, false, 2, 3, 0);
+        if (status == 122) continue;
+        if (status != 0) throw new InvalidOperationException("TCP table: " + status);
+        int count = Marshal.ReadInt32(buffer);
+        var listeners = new List<Listener>(count);
+        for (int i = 0; i < count; i++) {
+          int offset = 4 + i * 24;
+          uint address = unchecked((uint)Marshal.ReadInt32(buffer, offset + 4));
+          uint port = unchecked((uint)Marshal.ReadInt32(buffer, offset + 8));
+          listeners.Add(new Listener { a = new IPAddress(address).ToString(), t = (int)(((port & 255) << 8) | ((port >> 8) & 255)), o = Marshal.ReadInt32(buffer, offset + 20) });
+        }
+        return listeners.ToArray();
+      } finally { Marshal.FreeHGlobal(buffer); }
+    }
+    throw new InvalidOperationException("TCP table kept growing");
+  }
+}
+'@
 $p = @(Get-CimInstance Win32_Process | ForEach-Object {
   [pscustomobject]@{ p = $_.ProcessId; q = $_.ParentProcessId; c = $_.CreationDate.ToFileTimeUtc(); l = [string]$_.CommandLine }
 })
-$n = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | ForEach-Object {
-  [pscustomobject]@{ o = [int]$_.OwningProcess; t = [int]$_.LocalPort; a = [string]$_.LocalAddress }
-})
+$n = @([LingerTcpListeners]::Read())
 [pscustomobject]@{ p = $p; n = $n } | ConvertTo-Json -Compress -Depth 3
 `;
 export interface WindowsProcess {

@@ -363,8 +363,10 @@ Gateway and runs Agents. The daemon exits with the app.
   controller under `runtime/model-services` (`foundations stop`), and to stop
   the stack's processes and the gateway the tool started, the library's
   Bifrost included (`stack down`); it downloads nothing, and Linger does not
-  end the tool's processes itself. Every step runs even when an earlier one
-  fails.
+  end the tool's processes itself. Every stop command runs even when an
+  earlier command fails. A present tool kit that fails verification makes
+  the stop fail, so the uninstaller retains the application for repair and
+  retry.
   On Windows the tool cannot prove and end a controller from a kit that has
   no stop command.
   A quit the person chose (the tray, the app menu, the Dock) does the same
@@ -426,7 +428,9 @@ home> --stop-local-models` under `ELECTRON_RUN_AS_NODE`, detached, with
 4. The computer needs Codex or Claude Code installed and signed in; the
    daemon finds them through the login shell PATH. The teamhub CLI runs on
    the app's own Node (`ELECTRON_RUN_AS_NODE`) in packaged builds and on the
-   `node` in PATH from source.
+   `node` in PATH from source. The Desktop TeamHub shell launcher uses
+   `wslpath` and `WSLENV` when WSL starts the Windows executable, so the
+   script path and `ELECTRON_RUN_AS_NODE` reach that process correctly.
 
 ## Source Package and Release
 

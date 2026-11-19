@@ -35,6 +35,7 @@ async function reopenDirectories(directory: string): Promise<void> {
 }
 afterEach(async () => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   await Promise.all(
     roots.splice(0).map(async (p) => {
       // Verified kits are sealed read-only; reopen them before cleanup.
@@ -562,6 +563,22 @@ test("a home without the pinned kit has nothing to stop and downloads nothing", 
     f.source.sha256,
   ]);
 });
+test("reports a corrupt installed kit as a stop failure without running or replacing it", async () => {
+  const f = await fixture();
+  const file = path.join(f.directory, "modules/localmodels/__init__.py");
+  await writeFile(file, "corrupt");
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", JSON.stringify(f.source));
+  const fetcher = vi.fn<typeof fetch>();
+  vi.stubGlobal("fetch", fetcher);
+  const run = vi.fn<typeof runLocalmodels>();
+  await expect(
+    stopLocalmodels(f.home, { signal: AbortSignal.timeout(5000) }, { run }),
+  ).rejects.toThrow("the installed tool kit could not be verified");
+  expect(run).not.toHaveBeenCalled();
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(await readFile(file, "utf8")).toBe("corrupt");
+}, 15_000);
+
 test("stops the stack even when the controller did not stop, and names the failure", async () => {
   const run = vi.fn<typeof runLocalmodels>(async (_home, args) =>
     args[0] === "foundations"
