@@ -374,7 +374,9 @@ Gateway and runs Agents. The daemon exits with the app.
   that keep running: `LocalServer` starts `installer.js --home <default
 home> --stop-local-models` under `ELECTRON_RUN_AS_NODE`, detached, with
   its output in `<home>/installer/local-models-stop.log`, and does not wait
-  for it. It runs only when `desktop/local-server.json` names an
+  for it. If the installed kit fails verification, the helper exits with a
+  failure and logs the repair guidance; the app still quits, and no unverified
+  tool runs. It runs only when `desktop/local-server.json` names an
   installation. The Computer exits with the app, so nothing uses the models
   until the next launch, whose resume applies the approved plan again even
   though the services still run, unless the person switched the Computer's
@@ -431,6 +433,9 @@ home> --stop-local-models` under `ELECTRON_RUN_AS_NODE`, detached, with
    `node` in PATH from source. The Desktop TeamHub shell launcher uses
    `wslpath` and `WSLENV` when WSL starts the Windows executable, so the
    script path and `ELECTRON_RUN_AS_NODE` reach that process correctly.
+   Arguments are forwarded unchanged: for a file flag like `--attach`,
+   convert the Linux path explicitly with `wslpath -w` before passing it
+   to Windows Node. Other arguments may be message text or remote paths.
 
 ## Source Package and Release
 

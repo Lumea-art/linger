@@ -80,7 +80,7 @@ export async function downloadVerified(
       completed = existing.size;
     } else await rm(partial, { recursive: true, force: true });
   }
-  const handle = await open(partial, options.resumable ? "a" : "ax", 0o600);
+  let handle = await open(partial, options.resumable ? "a" : "ax", 0o600);
   let size: number | undefined;
   let lastProgressAt = 0;
   let failure = "no connection";
@@ -126,8 +126,11 @@ export async function downloadVerified(
         return "done";
       }
       if (completed && response.status === 200) {
-        // The host ignored the range, so this response starts over.
-        await handle.truncate(0);
+        // The host ignored the range. Windows append handles cannot truncate,
+        // so start over with a newly created private partial file.
+        await handle.close();
+        await rm(partial, { force: true });
+        handle = await open(partial, "ax", 0o600);
         hash = createHash(options.algorithm);
         completed = 0;
       }

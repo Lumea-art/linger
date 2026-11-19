@@ -1,5 +1,7 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
+import path from "node:path";
+import { createInterface } from "node:readline";
 
 const leaseKey = "LINGER_NATIVE_PROCESS_LEASE";
 function runProcess(
@@ -20,8 +22,7 @@ function runProcess(
     execFile(
       executable,
       args,
-      // Startup polls this every half second; on Windows each PowerShell
-      // would otherwise open its own console window.
+      // Inspectors run in the background, including during Windows startup.
       {
         env,
         timeout: options.timeoutMs,
@@ -43,50 +44,13 @@ function runProcess(
 // Windows has no process groups and no readable foreign environment. The
 // supervisor carries the lease in its command line (the job file name), and
 // what it starts is found through parent links; a creation time older than
-// the parent's means a reused PID, never a child. The listening TCP ports
-// come in the same snapshot, so a port's owner is judged against the same
-// process tree.
+// the parent's means a reused PID, never a child.
 const WINDOWS_PROCESSES = String.raw`
 $ErrorActionPreference = 'Stop'
-Add-Type -TypeDefinition @'
-using System;
-using System.Collections.Generic;
-using System.Net;
-using System.Runtime.InteropServices;
-public static class LingerTcpListeners {
-  [DllImport("iphlpapi.dll")]
-  static extern uint GetExtendedTcpTable(IntPtr table, ref int size, bool order, int family, int tableClass, uint reserved);
-  public sealed class Listener { public string a; public int t; public int o; }
-  public static Listener[] Read() {
-    int size = 0;
-    uint status = GetExtendedTcpTable(IntPtr.Zero, ref size, false, 2, 3, 0);
-    if (status != 122) throw new InvalidOperationException("TCP table size: " + status);
-    for (int attempt = 0; attempt < 3; attempt++) {
-      IntPtr buffer = Marshal.AllocHGlobal(size);
-      try {
-        status = GetExtendedTcpTable(buffer, ref size, false, 2, 3, 0);
-        if (status == 122) continue;
-        if (status != 0) throw new InvalidOperationException("TCP table: " + status);
-        int count = Marshal.ReadInt32(buffer);
-        var listeners = new List<Listener>(count);
-        for (int i = 0; i < count; i++) {
-          int offset = 4 + i * 24;
-          uint address = unchecked((uint)Marshal.ReadInt32(buffer, offset + 4));
-          uint port = unchecked((uint)Marshal.ReadInt32(buffer, offset + 8));
-          listeners.Add(new Listener { a = new IPAddress(address).ToString(), t = (int)(((port & 255) << 8) | ((port >> 8) & 255)), o = Marshal.ReadInt32(buffer, offset + 20) });
-        }
-        return listeners.ToArray();
-      } finally { Marshal.FreeHGlobal(buffer); }
-    }
-    throw new InvalidOperationException("TCP table kept growing");
-  }
-}
-'@
 $p = @(Get-CimInstance Win32_Process | ForEach-Object {
   [pscustomobject]@{ p = $_.ProcessId; q = $_.ParentProcessId; c = $_.CreationDate.ToFileTimeUtc(); l = [string]$_.CommandLine }
 })
-$n = @([LingerTcpListeners]::Read())
-[pscustomobject]@{ p = $p; n = $n } | ConvertTo-Json -Compress -Depth 3
+[pscustomobject]@{ p = $p } | ConvertTo-Json -Compress -Depth 3
 `;
 export interface WindowsProcess {
   pid: number;
@@ -106,30 +70,44 @@ export interface WindowsSnapshot {
 type Rows<T> = T | T[] | null | undefined;
 const rows = <T>(value: Rows<T>): T[] =>
   value == null ? [] : Array.isArray(value) ? value : [value];
-export function parseWindowsSnapshot(stdout: string): WindowsSnapshot {
-  const parsed = JSON.parse(stdout || "{}") as {
-    p?: Rows<{ p: number; q: number; c: number; l: string | null }>;
-    n?: Rows<{ o: number; t: number; a: string }>;
+function parseWindowsProcesses(stdout: string): WindowsProcess[] {
+  const parsed = JSON.parse(stdout) as {
+    p: Rows<{ p: number; q: number; c: number; l: string | null }>;
   };
-  return {
-    processes: rows(parsed.p).map((row) => ({
-      pid: row.p,
-      parent: row.q,
-      created: row.c,
-      command: row.l ?? "",
-    })),
-    listeners: new Map(
-      rows(parsed.n)
-        .filter((row) => row.a === "127.0.0.1" || row.a === "0.0.0.0")
-        // The loopback listener is the one a health check reaches.
-        .sort(
-          (a, b) => Number(a.a === "127.0.0.1") - Number(b.a === "127.0.0.1"),
-        )
-        .map((row) => [row.t, row.o]),
-    ),
-  };
+  if (!parsed.p) throw new Error("Native processes could not be enumerated.");
+  return rows(parsed.p).map((row) => ({
+    pid: row.p,
+    parent: row.q,
+    created: row.c,
+    command: row.l ?? "",
+  }));
 }
-export async function windowsSnapshot(): Promise<WindowsSnapshot> {
+
+function addWindowsListener(listeners: Map<number, number>, line: string) {
+  // A listening TCP row has no remote peer. The state text is localized.
+  const match =
+    /^\s*TCP\s+(127\.0\.0\.1|0\.0\.0\.0):(\d+)\s+0\.0\.0\.0:0\s+.+?\s+(\d+)\s*$/.exec(
+      line,
+    );
+  if (!match) return;
+  const [, ip, portText, pidText] = match;
+  const port = Number(portText);
+  const pid = Number(pidText);
+  if (port < 1 || port > 65535 || pid < 1 || pid > 0xffffffff) return;
+  // A specific loopback bind takes precedence over an IPv4 wildcard.
+  if (ip === "127.0.0.1" || !listeners.has(port)) listeners.set(port, pid);
+}
+
+/** The IPv4 listeners a service's loopback health check can reach. */
+export async function parseWindowsListeners(
+  lines: AsyncIterable<string> | Iterable<string>,
+): Promise<Map<number, number>> {
+  const listeners = new Map<number, number>();
+  for await (const line of lines) addWindowsListener(listeners, line);
+  return listeners;
+}
+
+export async function windowsProcesses(): Promise<WindowsProcess[]> {
   const result = await runProcess(
     "powershell.exe",
     ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_PROCESSES],
@@ -137,10 +115,51 @@ export async function windowsSnapshot(): Promise<WindowsSnapshot> {
   );
   if (result.code !== 0)
     throw new Error("Native processes could not be enumerated.");
-  return parseWindowsSnapshot(result.stdout);
+  return parseWindowsProcesses(result.stdout);
 }
-export async function windowsProcesses(): Promise<WindowsProcess[]> {
-  return (await windowsSnapshot()).processes;
+
+async function windowsListeners(): Promise<Map<number, number>> {
+  const env = { ...process.env };
+  delete env[leaseKey];
+  const child = spawn(
+    path.win32.join(
+      process.env.SystemRoot ?? "C:\\Windows",
+      "System32",
+      "netstat.exe",
+    ),
+    ["-ano", "-p", "TCP"],
+    { env, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] },
+  );
+  // Established and TIME_WAIT rows can exceed execFile's buffer. Consume
+  // lines as they arrive and retain only the small index of listeners.
+  const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
+  let sawOutput = false;
+  lines.on("line", () => (sawOutput = true));
+  const status = new Promise<number | null>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", resolve);
+  });
+  const timer = setTimeout(() => child.kill(), 15_000);
+  try {
+    const [listeners, code] = await Promise.all([
+      parseWindowsListeners(lines),
+      status,
+    ]);
+    if (code !== 0 || !sawOutput)
+      throw new Error("Native TCP listeners could not be enumerated.");
+    return listeners;
+  } finally {
+    clearTimeout(timer);
+    lines.close();
+  }
+}
+
+export async function windowsSnapshot(): Promise<WindowsSnapshot> {
+  const [processes, listeners] = await Promise.all([
+    windowsProcesses(),
+    windowsListeners(),
+  ]);
+  return { processes, listeners };
 }
 /**
  * The PowerShell a supervisor starts to take this snapshot is its own child.
