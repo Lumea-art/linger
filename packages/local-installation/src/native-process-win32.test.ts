@@ -146,6 +146,26 @@ test("stop ends the whole tree leaves first and forgets the record", async () =>
   ).rejects.toThrow();
 });
 
+test.each([
+  ["a different lease", () => worker(10, "web", "c".repeat(64))],
+  ["an unreadable command line", () => row(10, 1, 100)],
+])(
+  "stop retains the live record with %s and signals nothing",
+  async (_, supervisor) => {
+    await record("web", 10);
+    host.processes.push(supervisor(), row(11, 10, 101, "web.exe"));
+    const file = path.join(root, "native/processes/web.json");
+    const original = await readFile(file, "utf8");
+
+    await expect(stopNativeProcess(root, "web")).rejects.toThrow(
+      /identity cannot be verified.*record retained/i,
+    );
+    expect(host.ended).toEqual([]);
+    expect(taskkill.calls).toEqual([]);
+    await expect(readFile(file, "utf8")).resolves.toBe(original);
+  },
+);
+
 test("stop forgets a record whose PID Windows gave to another program", async () => {
   await record("web", 10);
   host.processes.push(row(10, 1, 900, "notepad.exe"));
