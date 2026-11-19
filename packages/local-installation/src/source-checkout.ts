@@ -337,9 +337,14 @@ export async function prepareSourceConfiguration(
       ),
     };
     const quote = (value: string) => {
-      if (/[\r\n\0']/.test(value))
-        throw new Error("Source environment contains unsupported characters.");
-      return `'${value}'`;
+      if (!/[\r\n\0]/.test(value)) {
+        // Match the launcher's parser, including literal Windows backslashes.
+        for (const delimiter of ["'", "`", '"', ""]) {
+          const quoted = `${delimiter}${value}${delimiter}`;
+          if (parseEnv(`VALUE=${quoted}`).VALUE === value) return quoted;
+        }
+      }
+      throw new Error("Source environment contains unsupported characters.");
     };
     const nativeFileOmissions = new Set([
       "WEB_HTTP_PORT",
@@ -349,13 +354,17 @@ export async function prepareSourceConfiguration(
       "HOST",
       "LOCAL_ENV_FILE",
     ]);
-    await atomicPrivate(
-      envFile,
-      Object.entries(generated)
-        .filter(([key]) => !nativeFileOmissions.has(key))
-        .map(([key, value]) => `${key}=${quote(value)}`)
-        .join("\n") + "\n",
+    const entries = Object.entries(generated).filter(
+      ([key]) => !nativeFileOmissions.has(key),
     );
+    const text =
+      entries.map(([key, value]) => `${key}=${quote(value)}`).join("\n") + "\n";
+    // An unmatched leading quote can consume a later entry, even if the
+    // isolated value round-trips. Validate exactly what the launcher reads.
+    const parsed = parseEnv(text);
+    if (entries.some(([key, value]) => parsed[key] !== value))
+      throw new Error("Source environment contains unsupported characters.");
+    await atomicPrivate(envFile, text);
     return { instance, env: generated, warnings };
   });
 }

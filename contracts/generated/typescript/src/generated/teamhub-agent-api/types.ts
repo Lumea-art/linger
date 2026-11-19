@@ -2351,14 +2351,16 @@ export interface components {
       | "sunday";
     AgentRoutineSchedule: {
       /** @enum {string} */
-      kind: "daily" | "weekly" | "every_n_hours" | "once";
+      kind: "daily" | "weekly" | "every_n_minutes" | "every_n_hours" | "once";
       /** @description Local 24-hour clock as HH:MM. Required for daily and weekly. */
       time?: string;
       /** @description IANA timezone. Required for daily and weekly. */
       timezone?: string;
       /** @description Selected local weekdays. Required for weekly. Responses use Monday through Sunday order. */
       weekdays?: components["schemas"]["AgentRoutineWeekday"][];
-      /** @description Repeat interval for every_n_hours. Do not send a clock or timezone with it. */
+      /** @description Repeat interval in minutes for every_n_minutes (10 to 10080, in 10-minute increments). Do not send a clock or timezone with it. */
+      interval_minutes?: number;
+      /** @description Repeat interval in whole hours for every_n_hours (1 to 168), accepted on input for compatibility with older clients and stored in minutes. Responses always use every_n_minutes with interval_minutes. Do not send a clock or timezone with it. */
       interval_hours?: number;
       /**
        * Format: date-time

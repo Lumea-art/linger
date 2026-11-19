@@ -301,9 +301,8 @@ describe("Runtime model call", () => {
   });
 
   it("falls back to the other ready Runtime, and tries its own when none is ready", async () => {
-    const pi = { ...alice, runtimeType: "pi" as const };
     const fallback = setup({
-      placements: [pi],
+      placements: [alice],
       ready: (_computer, runtime) => runtime === "claude",
     });
     await fallback.modelCall.call({ ...ask, input: "x" });
@@ -358,22 +357,29 @@ describe("Runtime model call", () => {
   });
 
   it.each([
-    ["unavailable", "computer_offline"],
-    ["runtime_unavailable", "runtime_unavailable"],
-    ["auth_required", "runtime_unavailable"],
-    ["runtime_incompatible", "runtime_unavailable"],
-    ["timed_out", "timed_out"],
-    ["output_limited", "output_limited"],
-    ["failed", "failed"],
-  ] as const)("maps a %s outcome to %s", async (outcome, kind) => {
-    const { modelCall } = setup({
-      placements: [alice],
-      outcomes: [{ outcome, duration_ms: 0 }],
-    });
-    await expect(
-      modelCall.text({ ...work, kind: "approval", input: "x" }),
-    ).rejects.toMatchObject({ name: "ModelCallError", kind });
-  });
+    ["unavailable", "computer_offline", undefined],
+    ["runtime_unavailable", "runtime_unavailable", "runtime_unavailable"],
+    ["auth_required", "runtime_unavailable", "auth_required"],
+    ["runtime_incompatible", "runtime_unavailable", "runtime_incompatible"],
+    ["timed_out", "timed_out", undefined],
+    ["output_limited", "output_limited", undefined],
+    ["failed", "failed", undefined],
+  ] as const)(
+    "maps a %s outcome to %s",
+    async (outcome, kind, runtimeOutcome) => {
+      const { modelCall } = setup({
+        placements: [alice],
+        outcomes: [{ outcome, duration_ms: 0 }],
+      });
+      await expect(
+        modelCall.text({ ...work, kind: "approval", input: "x" }),
+      ).rejects.toMatchObject({
+        name: "ModelCallError",
+        kind,
+        ...(runtimeOutcome ? { runtimeOutcome } : {}),
+      });
+    },
+  );
 
   it("corrects an answer that breaks the schema within the kind's attempts", async () => {
     const corrected = setup({

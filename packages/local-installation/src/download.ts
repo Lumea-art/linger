@@ -102,11 +102,19 @@ export async function downloadVerified(
   if (options.resumable) {
     const existing = await lstat(partial).catch(() => undefined);
     if (existing?.isFile() && existing.size <= options.maxBytes) {
-      for await (const chunk of createReadStream(partial))
-        hash.update(chunk as Buffer);
+      try {
+        for await (const chunk of createReadStream(partial, {
+          signal: options.signal,
+        }))
+          hash.update(chunk as Buffer);
+      } catch (error) {
+        options.signal.throwIfAborted();
+        throw error;
+      }
       completed = existing.size;
     } else await rm(partial, { recursive: true, force: true });
   }
+  options.signal.throwIfAborted();
   const handle = await open(partial, options.resumable ? "a" : "ax", 0o600);
   let size: number | undefined;
   let lastProgressAt = 0;

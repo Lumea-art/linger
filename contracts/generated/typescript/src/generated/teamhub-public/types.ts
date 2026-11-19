@@ -5122,7 +5122,12 @@ export interface components {
     /** @description Stable catalog key. TeamHub validates app availability and capabilities. */
     ExternalAppKey: string;
     /** @enum {string} */
-    RoutineCadenceKind: "daily" | "weekly" | "every_n_hours" | "once";
+    RoutineCadenceKind:
+      | "daily"
+      | "weekly"
+      | "every_n_hours"
+      | "every_n_minutes"
+      | "once";
     /** @enum {string} */
     RoutineWeekday:
       | "monday"
@@ -5144,6 +5149,8 @@ export interface components {
       weekdays?: components["schemas"]["RoutineWeekday"][];
       /** @description Repeat interval for every_n_hours cadences. */
       interval_hours?: number;
+      /** @description Repeat interval in minutes for every_n_minutes cadences, in 10-minute increments. */
+      interval_minutes?: number;
       /**
        * Format: date-time
        * @description The one moment a once cadence fires; the Routine is done (disabled) afterwards.
@@ -6793,6 +6800,15 @@ export interface components {
      * @enum {string}
      */
     PersonalWikiState: "idle" | "refreshing" | "failed";
+    /**
+     * @description Actionable cause of the latest failed refresh when known: computer_offline, runtime_incompatible, runtime_auth_required, or runtime_unavailable.
+     * @enum {string}
+     */
+    PersonalWikiFailureReason:
+      | "computer_offline"
+      | "runtime_incompatible"
+      | "runtime_auth_required"
+      | "runtime_unavailable";
     PersonalWiki: {
       /** @description Absent until a write (binding or uploading a source, a refresh request from Memory) creates the Wiki root. */
       id?: components["schemas"]["Id"];
@@ -6804,6 +6820,8 @@ export interface components {
        */
       published_generation: number;
       state: components["schemas"]["PersonalWikiState"];
+      /** @description Present when state is failed and the refresh failed for an actionable Computer or Runtime cause. */
+      failure_reason?: components["schemas"]["PersonalWikiFailureReason"];
       /**
        * Format: int64
        * @description Advances when the active refresh has a new three-minute preview.

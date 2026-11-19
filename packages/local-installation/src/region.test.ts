@@ -56,6 +56,14 @@ function probe(mirror: number, global: number) {
 }
 const hour = 60 * 60_000;
 
+function gate() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 it("takes SIMPLEX_REGION over a saved region and records it", async () => {
   const directory = await home();
   await saved(directory, { region: "global" });
@@ -126,6 +134,83 @@ it("resolves once per process and home", async () => {
     region: "global",
     method: "probe",
   });
+});
+
+it.each([0, 1])(
+  "cancelling shared region caller %i does not cancel the other caller",
+  async (cancelled) => {
+    const directory = await home();
+    const reference = probe(4096, 16);
+    await resolveRegion(await home(), { fetcher: reference });
+    const expectedRequests = reference.mock.calls.length;
+    const controllers = [new AbortController(), new AbortController()];
+    const started = gate();
+    const release = gate();
+    let requests = 0;
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      if (++requests === 2) started.resolve();
+      await release.promise;
+      return probe(4096, 16)(input);
+    }) as unknown as typeof fetch;
+    const pending = controllers.map((controller) =>
+      resolveRegion(directory, { signal: controller.signal, fetcher }),
+    );
+    const settled = Promise.allSettled(pending);
+    await started.promise;
+    const reason = new Error("cancelled this setup only");
+    controllers[cancelled]!.abort(reason);
+    release.resolve();
+    const results = await settled;
+    expect(results[cancelled]).toEqual({ status: "rejected", reason });
+    expect(results[1 - cancelled]).toEqual({
+      status: "fulfilled",
+      value: "cn",
+    });
+    expect(requests).toBe(expectedRequests);
+    expect(await resolveRegion(directory, { fetcher })).toBe("cn");
+    expect(requests).toBe(expectedRequests);
+  },
+);
+
+it("refuses an aborted caller even when the region is already cached", async () => {
+  const directory = await home();
+  expect(await resolveRegion(directory, { fetcher: probe(10, 1) })).toBe("cn");
+  const reason = new Error("cancelled before reading the cached region");
+  await expect(
+    resolveRegion(directory, { signal: AbortSignal.abort(reason) }),
+  ).rejects.toBe(reason);
+});
+
+it("stops an unneeded shared probe and lets the next caller try again", async () => {
+  const directory = await home();
+  const controllers = [new AbortController(), new AbortController()];
+  const started = gate();
+  const signals: AbortSignal[] = [];
+  const fetcher = vi.fn(
+    async (_input: string | URL | Request, init?: RequestInit) => {
+      const signal = init!.signal!;
+      signals.push(signal);
+      if (signals.length === 2) started.resolve();
+      return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), {
+          once: true,
+        });
+      });
+    },
+  ) as unknown as typeof fetch;
+  const pending = controllers.map((controller) =>
+    resolveRegion(directory, { signal: controller.signal, fetcher }),
+  );
+  const settled = Promise.allSettled(pending);
+  await started.promise;
+  controllers.forEach((controller) => controller.abort());
+  expect((await settled).every((result) => result.status === "rejected")).toBe(
+    true,
+  );
+  expect(signals.every((signal) => signal.aborted)).toBe(true);
+  const retry = probe(4096, 16);
+  expect(await resolveRegion(directory, { fetcher: retry })).toBe("cn");
+  expect(retry).toHaveBeenCalled();
 });
 
 it("stays global without saving when neither registry answers", async () => {

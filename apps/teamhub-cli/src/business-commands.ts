@@ -953,11 +953,12 @@ async function schedule(
   );
   const daily = option(args, "--daily"),
     weekly = option(args, "--weekly"),
-    every = option(args, "--every-hours"),
+    everyMinutes = option(args, "--every-minutes"),
+    everyHours = option(args, "--every-hours"),
     at = option(args, "--at"),
     timezone = option(args, "--timezone"),
     weekdays = values(args, "--weekday");
-  const simple = [daily, weekly, every, at].filter(
+  const simple = [daily, weekly, everyMinutes, everyHours, at].filter(
     (value) => value !== undefined,
   ).length;
   if (jsonProvided) {
@@ -969,7 +970,7 @@ async function schedule(
   }
   if (simple !== 1)
     invalid(
-      "Choose --daily, --weekly, --every-hours, --at or complete schedule JSON.",
+      "Choose --daily, --weekly, --every-minutes, --every-hours, --at or complete schedule JSON.",
     );
   if (at !== undefined) {
     if (weekdays.length) invalid("--at cannot include weekday.");
@@ -979,12 +980,23 @@ async function schedule(
       );
     return { kind: "once", run_at: at, ...optional("timezone", timezone) };
   }
-  if (every !== undefined) {
+  if (everyMinutes !== undefined) {
+    if (timezone !== undefined || weekdays.length)
+      invalid("--every-minutes cannot include timezone or weekday.");
+    const minutes = integer(everyMinutes, "--every-minutes", 10, 10_080)!;
+    if (minutes % 10 !== 0)
+      invalid("--every-minutes must be a multiple of 10 minutes.");
+    return {
+      kind: "every_n_minutes",
+      interval_minutes: minutes,
+    };
+  }
+  if (everyHours !== undefined) {
     if (timezone !== undefined || weekdays.length)
       invalid("--every-hours cannot include timezone or weekday.");
     return {
       kind: "every_n_hours",
-      interval_hours: integer(every, "--every-hours", 1, 168),
+      interval_hours: integer(everyHours, "--every-hours", 1, 168),
     };
   }
   if (timezone === undefined)
@@ -1013,13 +1025,18 @@ const routines = ["create", "list", "pause", "enable", "run", "delete"].map(
               ),
               ...jsonOptions(
                 "schedule",
-                "Complete daily, weekly, every_n_hours or once schedule JSON.",
+                "Complete daily, weekly, every_n_minutes or once schedule JSON.",
               ),
               "--daily": flag("Daily local time as HH:MM."),
               "--weekly": flag("Weekly local time as HH:MM."),
               "--weekday": flag("Selected weekday; repeat unique days.", true),
               "--timezone": flag("Explicit IANA timezone for daily or weekly."),
-              "--every-hours": flag("Repeat every 1-168 hours."),
+              "--every-minutes": flag(
+                "Repeat every 10-10080 minutes (multiples of 10).",
+              ),
+              "--every-hours": flag(
+                "Repeat every 1-168 hours (compatibility alias for --every-minutes).",
+              ),
               "--at": flag(
                 "Fire once at this RFC 3339 time (with offset); done afterwards.",
               ),

@@ -163,14 +163,18 @@ async function verify(
       stamps[name] = stamp;
     }
   };
+  // Recovery may move or remove this kit, so wait for all active reads even
+  // when one worker has already found a mismatched asset.
+  let failure: { reason: unknown } | undefined;
   await Promise.all(
     Array.from({ length: Math.min(CONCURRENCY, assets.length) }, () =>
       worker().catch((error: unknown) => {
         next = assets.length;
-        throw error;
+        failure ??= { reason: error };
       }),
     ),
   );
+  if (failure) throw failure.reason;
   return {
     python: await regular(directory, m.python),
     moduleDir: path.join(directory, m.moduleDir),
