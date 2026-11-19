@@ -5,6 +5,7 @@ import { createHash, randomBytes } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
+import { windowsSystemRoot } from "./config.js";
 import { atomicPrivate, privateDirectory, readPrivate } from "./instance.js";
 import { runProcess, windowsTreeTermination } from "./process.js";
 import {
@@ -197,7 +198,7 @@ export async function inspectNativeListeners(
         running: (await inspectNativeProcess(root, name)).running,
       })),
     );
-  const snapshot = await windowsSnapshot();
+  const snapshot = await windowsSnapshot(windowsSystemRoot());
   return Promise.all(
     listeners.map(async ({ name, port }) => {
       const record = await stored(root, name);
@@ -779,11 +780,15 @@ export async function reclaimNativeOrphans(
   const ended: number[] = [];
   const deadline = Date.now() + 12_000;
   for (;;) {
-    const orphans = windowsOrphans(await windowsSnapshot(), records, {
-      root,
-      ...options,
-      self: process.pid,
-    });
+    const orphans = windowsOrphans(
+      await windowsSnapshot(windowsSystemRoot()),
+      records,
+      {
+        root,
+        ...options,
+        self: process.pid,
+      },
+    );
     if (!orphans.length) return ended;
     if (Date.now() >= deadline)
       throw new Error(

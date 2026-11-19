@@ -2,8 +2,8 @@ import { execFile, spawn } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline";
-import { windowsSystemRoot } from "./config.js";
 
+// The source supervisor imports this module directly, before any build.
 const leaseKey = "LINGER_NATIVE_PROCESS_LEASE";
 function runProcess(
   executable: string,
@@ -119,11 +119,13 @@ export async function windowsProcesses(): Promise<WindowsProcess[]> {
   return parseWindowsProcesses(result.stdout);
 }
 
-async function windowsListeners(): Promise<Map<number, number>> {
+async function windowsListeners(
+  systemRoot: string,
+): Promise<Map<number, number>> {
   const env = { ...process.env };
   delete env[leaseKey];
   const child = spawn(
-    path.win32.join(windowsSystemRoot(), "System32", "netstat.exe"),
+    path.win32.join(systemRoot, "System32", "netstat.exe"),
     ["-ano", "-p", "TCP"],
     { env, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] },
   );
@@ -151,10 +153,12 @@ async function windowsListeners(): Promise<Map<number, number>> {
   }
 }
 
-export async function windowsSnapshot(): Promise<WindowsSnapshot> {
+export async function windowsSnapshot(
+  systemRoot: string,
+): Promise<WindowsSnapshot> {
   const [processes, listeners] = await Promise.all([
     windowsProcesses(),
-    windowsListeners(),
+    windowsListeners(systemRoot),
   ]);
   return { processes, listeners };
 }

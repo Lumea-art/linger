@@ -1,5 +1,6 @@
 import { createServer } from "node:net";
 import { expect, test } from "vitest";
+import { windowsSystemRoot } from "./config.js";
 import { windowsSnapshot } from "./native-process-identity.js";
 
 test.skipIf(process.platform !== "win32")(
@@ -13,7 +14,7 @@ test.skipIf(process.platform !== "win32")(
     try {
       const address = server.address();
       if (!address || typeof address === "string") throw new Error("No port");
-      const snapshot = await windowsSnapshot();
+      const snapshot = await windowsSnapshot(windowsSystemRoot());
       expect(snapshot.listeners.get(address.port)).toBe(process.pid);
       expect(
         snapshot.processes.some((entry) => entry.pid === process.pid),
