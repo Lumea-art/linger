@@ -15,6 +15,7 @@ interface Input {
   runtime: NativeRuntime;
 }
 interface Session {
+  runtime: NativeRuntime;
   snapshot: Snapshot;
   child: ChildProcess;
   timer: ReturnType<typeof setTimeout>;
@@ -70,15 +71,17 @@ export class RuntimeLoginManager {
       // callback. Let it exit naturally; killing it here races that response.
       return { state: "ready" };
     }
+    const session = this.sessions.get(input.instance);
     return structuredClone(
-      this.sessions.get(input.instance)?.snapshot ?? { state: "idle" },
+      session?.runtime === input.runtime ? session.snapshot : { state: "idle" },
     );
   }
   async start(input: Input, code?: string): Promise<Snapshot> {
     if (code !== undefined) {
       const session = this.sessions.get(input.instance);
       if (
-        !session?.snapshot.acceptsCode ||
+        session?.runtime !== input.runtime ||
+        !session.snapshot.acceptsCode ||
         !session.child.stdin?.writable ||
         !/^[A-Za-z0-9._~+/#=-]{1,4096}$/.test(code)
       )
@@ -103,10 +106,13 @@ export class RuntimeLoginManager {
       return { state: "idle" };
     this.starting.delete(input.instance);
     const { env, state } = result;
-    if (state.ready) return { state: "ready" };
     const existing = this.sessions.get(input.instance);
+    if (existing && existing.runtime !== input.runtime)
+      this.stop(input.instance);
+    if (state.ready) return { state: "ready" };
     if (
       existing &&
+      existing.runtime === input.runtime &&
       ["starting", "waiting_user"].includes(existing.snapshot.state)
     )
       return structuredClone(existing.snapshot);
@@ -136,6 +142,7 @@ export class RuntimeLoginManager {
       stdio: ["pipe", "pipe", "pipe"],
     });
     const session: Session = {
+      runtime: input.runtime,
       child,
       snapshot: { state: "starting" },
       timer: setTimeout(() => {

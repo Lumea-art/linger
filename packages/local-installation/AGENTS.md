@@ -11,6 +11,10 @@ stop unrelated processes, pull mutable images, or delete volumes as recovery.
 Every installation runs natively from a Linger source checkout; Docker is not
 used.
 
+`atomicPrivate` closes and removes its temporary file on failed writes or
+syncs as well as failed publication. A failed replacement keeps the previous
+private file available, without leaving partial configuration copies behind.
+
 The account file records provisioning history, not current database readiness
 or a promise that its saved password is still current. On HTTP 401, the existing
 idempotent owner command establishes whether this email owns the deployment and
@@ -42,7 +46,9 @@ the environment file.
 Every port the installer chooses (`ports.ts`) must be free on both
 127.0.0.1 and ::1 with nothing answering there: `localhost` resolves to ::1
 first on macOS, and a program on ::1 alone would answer for a service that
-bound 127.0.0.1 without an error. The web static host listens on both. Each
+bound 127.0.0.1 without an error. The web static host listens on both.
+Creating an instance also reserves other instances' saved LiveKit HTTP and RTC
+ports, even while their voice services are stopped. Each
 start re-checks a stopped service's ports and moves one another program took
 to a free port, persisted in `instance.json` or `livekit.env`, so the service
 restarts with the new environment. The web port is the product origin
@@ -91,6 +97,11 @@ never leaves a directory that later attempts treat as initialized. A `postgres-d
 `PG_VERSION` but no `postmaster.opts` (which only a started server writes)
 never served a connection, holds no data, and is initialized again.
 
+The desktop's bundled TeamHub binaries (`teamhub-binaries.ts`) count as current
+only when their files still match the manifest's sizes and hashes. A missing
+or damaged installed file is copied again from the bundle, so Native can use
+the verified binaries without downloading Go and compiling from source.
+
 Every Linger release creates TeamHub's schema from the 852 baseline
 migration, which refuses a database that already holds one. A database from
 the desktop app before the rename has `public.accounts` but no applied 852
@@ -131,6 +142,9 @@ its approved plan applied again and the local source set again. Deployments,
 that check and the quit-time stop share one lock per home
 (`withLocalModelsLock`); the check waits up to 180 s for it, past the stop's
 150 s hard exit, then asks to try again.
+
+`runProcess` decodes stdout and stderr as separate UTF-8 streams before
+capture and output callbacks, preserving characters split across pipe reads.
 
 Each native service runs under a detached supervisor
 (`native-process-worker.mjs`) whose record holds its PID, birth and an
@@ -180,6 +194,12 @@ under a lease no record holds, once its environment proves that lease; an
 attempt that failed or was killed before keeping a record would otherwise
 leave PostgreSQL holding `postmaster.pid` against every retry.
 
+Native runtime and localmodels kit verification (`native-runtime.ts` and
+`localmodels-tool.ts`) stop assigning files on the first mismatch and wait
+for every active verification worker to finish before reporting failure.
+Recovery moves or removes an invalid runtime or kit only after those
+workers have released their file handles.
+
 Every download offered by both a global host and a mainland-China mirror
 goes through `downloadInRegion` (`region.ts`), which tries the home's
 download region first and never drops a source; the region is
@@ -187,7 +207,10 @@ download region first and never drops a source; the region is
 best-of-three npm registry probe (up to 1 MiB per round, fastest wins). When
 the preferred region fails or transfers slowly while a mirror in the other
 region proves faster, the transfer resumes there and rewrites the file. The
-resolved region reaches every `localmodels` child and native service as
+probe is shared per home, but cancellation belongs to each caller: one setup
+leaving does not cancel another, and the last waiter leaving aborts the probe
+so a later caller can retry. Even a cached region respects caller cancellation.
+The resolved region reaches every `localmodels` child and native service as
 `SIMPLEX_REGION`. The contract is in `scripts/installs/README.md`.
 
 Verified downloads stop reading on explicit cancellation even when a response
@@ -201,6 +224,8 @@ leaves the partial file intact for the next attempt.
 Move a freshly downloaded or unpacked file or folder into place with
 `renameRetrying` from `fs-retry.ts`: on Windows antivirus and indexing hold
 new files for a moment, and a plain rename then fails with EPERM.
+Cancellation is checked before every rename attempt, including after a
+retry wait, so a cancelled installation cannot publish the waiting file.
 
 Verified Windows kit files carry the read-only attribute before publication or
 reuse so Python children cannot replace their checked bytecode. The separate
