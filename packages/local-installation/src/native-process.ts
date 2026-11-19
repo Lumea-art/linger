@@ -14,6 +14,7 @@ import {
   nativeProcessIdentity as observed,
   nativeLeaseProcesses,
   windowsLeaseTree,
+  windowsProcesses,
   windowsSnapshot,
   type WindowsProcess,
   type WindowsSnapshot,
@@ -162,7 +163,7 @@ function recordedTree(
 async function serving(record: Lease): Promise<boolean> {
   if (process.platform !== "win32")
     return (await observed(record.pid, record.lease)) === record.birth;
-  return recordedTree((await windowsSnapshot()).processes, record).length > 1;
+  return recordedTree(await windowsProcesses(), record).length > 1;
 }
 export async function inspectNativeProcess(
   root: string,
@@ -583,7 +584,7 @@ async function windowsStopSnapshot(
   record?: Pick<Lease, "pid" | "birth">,
 ): Promise<{ snapshot: WindowsProcess[]; tree: WindowsProcess[] }> {
   const read = async () => {
-    const snapshot = (await windowsSnapshot()).processes;
+    const snapshot = await windowsProcesses();
     const tree = windowsLeaseTree(snapshot, lease);
     const unverified =
       record && tree[0]?.pid !== record.pid

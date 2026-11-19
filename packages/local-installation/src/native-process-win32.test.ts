@@ -14,21 +14,25 @@ const host = vi.hoisted(() => ({
   processes: [] as WindowsProcess[],
   exiting: [] as WindowsProcess[],
   listeners: new Map<number, number>(),
+  listenersAvailable: true,
   ended: [] as number[],
   cascade: new Map<number, number[]>(),
 }));
 vi.mock("./native-process-identity.js", async (original) => {
   const actual =
     await original<typeof import("./native-process-identity.js")>();
-  const snapshot = async (): Promise<WindowsSnapshot> => ({
-    processes: [...host.processes, ...host.exiting.splice(0)],
-    listeners: new Map(host.listeners),
-  });
-  return {
-    ...actual,
-    windowsSnapshot: snapshot,
-    windowsProcesses: async () => (await snapshot()).processes,
+  const windowsProcesses = async () => [
+    ...host.processes,
+    ...host.exiting.splice(0),
+  ];
+  const windowsSnapshot = async (): Promise<WindowsSnapshot> => {
+    if (!host.listenersAvailable) throw new Error("Cannot read TCP listeners");
+    return {
+      processes: await windowsProcesses(),
+      listeners: new Map(host.listeners),
+    };
   };
+  return { ...actual, windowsSnapshot, windowsProcesses };
 });
 const taskkill = vi.hoisted(() => ({
   calls: [] as string[][],
@@ -71,6 +75,7 @@ beforeEach(async () => {
   host.processes = [row(1, 0, 1, "wininit.exe")];
   host.exiting = [];
   host.listeners = new Map();
+  host.listenersAvailable = true;
   host.ended = [];
   host.cascade = new Map();
   taskkill.calls = [];
@@ -118,7 +123,8 @@ async function record(name: string, pid: number, key = lease) {
   );
 }
 
-test("a supervisor whose service died is not running", async () => {
+test("a supervisor whose service died is not running even without listener data", async () => {
+  host.listenersAvailable = false;
   await record("livekit", 10);
   host.processes.push(
     worker(10, "livekit"),
@@ -129,7 +135,8 @@ test("a supervisor whose service died is not running", async () => {
   expect((await inspectNativeProcess(root, "livekit")).running).toBe(true);
 });
 
-test("stop ends the whole tree leaves first and forgets the record", async () => {
+test("stop ends the whole tree leaves first and forgets the record without listener data", async () => {
+  host.listenersAvailable = false;
   await record("teamhub", 10);
   host.processes.push(
     worker(10, "teamhub"),

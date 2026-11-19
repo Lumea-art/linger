@@ -2,6 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { windowsSystemRoot } from "./config.js";
 
 const leaseKey = "LINGER_NATIVE_PROCESS_LEASE";
 function runProcess(
@@ -122,11 +123,7 @@ async function windowsListeners(): Promise<Map<number, number>> {
   const env = { ...process.env };
   delete env[leaseKey];
   const child = spawn(
-    path.win32.join(
-      process.env.SystemRoot ?? "C:\\Windows",
-      "System32",
-      "netstat.exe",
-    ),
+    path.win32.join(windowsSystemRoot(), "System32", "netstat.exe"),
     ["-ano", "-p", "TCP"],
     { env, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] },
   );
