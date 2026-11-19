@@ -107,9 +107,10 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   authored by the Human and mentioning the AnotherMe, in another live Room
   where both are members, and it wakes the AnotherMe's Context there, which
   then speaks for itself. Only a Run whose inputs carry a message the Human
-  typed in the direct chat may hand off (`X-TeamHub-Run-Id`); proactive wakes,
-  Routines, card decisions and Task callbacks may not, because they often carry
-  outside content. The handoff body is hidden from the Web timeline but other
+  wrote, or a card they decided, in the direct chat may hand off
+  (`X-TeamHub-Run-Id`); proactive wakes, Routines and Task callbacks may not,
+  because they often carry outside content. A refusal names its reason in an
+  error issue, which the CLI shows the Agent. The handoff body is hidden from the Web timeline but other
   Agents in that Room can read it. Results come back through
   `send_direct_message`.
 

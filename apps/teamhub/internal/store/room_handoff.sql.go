@@ -26,8 +26,7 @@ SELECT EXISTS (
     AND context.tenant_id=$3::text
     AND context.agent_actor_id=$4::text
     AND message.author_actor_id=$5::text
-    AND message.message_kind='conversation'
-    AND message.card_context_message_id IS NULL
+    AND (message.message_kind='conversation' OR message.card_context_message_id IS NOT NULL)
 )::boolean
 `
 
@@ -39,10 +38,11 @@ type IsRunStartedByDirectChatHumanParams struct {
 	HumanActorID string `json:"human_actor_id"`
 }
 
-// Whether the Agent's running Run in its direct chat carries a request the
-// Human typed there: an ordinary conversation Message of the Human, not a
-// card decision, quiet wake, Routine fire or Task callback. A Room input names
-// the Messages it carries in payload invocationMessageIds.
+// Whether the Agent's running Run in its direct chat carries something the
+// Human did there: a Message they wrote, or the result of a card they decided
+// (both carry their card's context). Quiet wakes, Routine fires and Task
+// callbacks carry neither. A Room input names the Messages it carries in
+// payload invocationMessageIds.
 func (q *Queries) IsRunStartedByDirectChatHuman(ctx context.Context, arg IsRunStartedByDirectChatHumanParams) (bool, error) {
 	row := q.db.QueryRow(ctx, isRunStartedByDirectChatHuman,
 		arg.RoomID,

@@ -39,6 +39,14 @@ func (a *App) handOffAgentRoomWork(c *gin.Context) {
 		"This operation was already completed. The original handoff is returned; nothing new was posted."))
 }
 
+// writeRoomHandoffRefusal carries the refusal's reason in a model-safe issue,
+// which the CLI shows the Agent, so it can tell the Human what really
+// happened instead of guessing.
+func (a *App) writeRoomHandoffRefusal(c *gin.Context, code teamhubagentapi.AgentApiErrorCode, path, reason, message string) {
+	a.writeAgentAPIErrorWithIssues(c, http.StatusForbidden, code, "Room handoff was refused",
+		[]teamhubagentapi.AgentApiErrorIssue{{Path: path, Code: reason, Message: message}})
+}
+
 func (a *App) writeAgentRoomHandoffError(c *gin.Context, err error) bool {
 	if err == nil {
 		return false
@@ -49,16 +57,14 @@ func (a *App) writeAgentRoomHandoffError(c *gin.Context, err error) bool {
 	case errors.Is(err, agentauth.ErrCredentialInvalid):
 		a.writeAgentAPIError(c, http.StatusUnauthorized, teamhubagentapi.AgentApiErrorCodeAgentCredentialInvalid, "Agent credential is invalid or expired")
 	case errors.Is(err, agentroomhandoff.ErrNotRequestedByHuman):
-		a.writeAgentAPIError(c, http.StatusForbidden, teamhubagentapi.AgentApiErrorCodeOperationForbidden,
-			"Only a request your Human sent you in your direct chat can be handed to another Room; this turn did not start from one.")
-	case errors.Is(err, agentroomhandoff.ErrNotFromDirectChat):
-		a.writeAgentAPIError(c, http.StatusForbidden, teamhubagentapi.AgentApiErrorCodeOperationForbidden,
-			"Only Another Me hands work to another Room, from its direct chat with its Human.")
-	case errors.Is(err, agentauth.ErrForbidden):
-		a.writeAgentAPIError(c, http.StatusForbidden, teamhubagentapi.AgentApiErrorCodeOperationForbidden, agentForbiddenMessage(err, "hand_off_to_room is not allowed for this Context"))
+		a.writeRoomHandoffRefusal(c, teamhubagentapi.AgentApiErrorCodeOperationForbidden, "run", "not_requested_by_human",
+			"Hand off only in a turn your Human started in this direct chat, by writing to you or deciding one of your cards. In a proactive wake, Routine or Task report, tell your Human here and let them ask.")
+	case errors.Is(err, agentroomhandoff.ErrNotFromDirectChat), errors.Is(err, agentauth.ErrForbidden):
+		a.writeRoomHandoffRefusal(c, teamhubagentapi.AgentApiErrorCodeOperationForbidden, "context", "not_direct_chat",
+			"Only Another Me hands off, from its direct chat with its Human. In any other Room, work in that Room itself.")
 	case errors.Is(err, agentroomhandoff.ErrRoomUnavailable):
-		a.writeAgentAPIError(c, http.StatusForbidden, teamhubagentapi.AgentApiErrorCodeForbidden,
-			"That Room is unavailable: it must be another live Room where both you and your Human are members.")
+		a.writeRoomHandoffRefusal(c, teamhubagentapi.AgentApiErrorCodeForbidden, "room_id", "room_unavailable",
+			"The target must be another live Room, not a Thread or this chat, where both you and your Human are members; teamhub message read --list-inboxes lists your Rooms.")
 	case errors.Is(err, agentroomhandoff.ErrIdempotencyConflict):
 		a.writeAgentAPIError(c, http.StatusConflict, teamhubagentapi.AgentApiErrorCodeIdempotencyConflict, "Room handoff invocation was reused with different input")
 	case errors.Is(err, agentroomhandoff.ErrUnavailable):

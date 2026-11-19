@@ -39,8 +39,8 @@ var (
 	// ErrNotFromDirectChat reports a caller that is not an AnotherMe Meta in
 	// its direct chat with its Human.
 	ErrNotFromDirectChat = fmt.Errorf("%w: only an AnotherMe hands off from its direct chat", agentauth.ErrForbidden)
-	// ErrNotRequestedByHuman reports a Run that the Human's own message in the
-	// direct chat did not start, such as a proactive wake or a Routine.
+	// ErrNotRequestedByHuman reports a Run that nothing the Human did in the
+	// direct chat started, such as a proactive wake, Routine or Task report.
 	ErrNotRequestedByHuman = fmt.Errorf("%w: only a turn the Human started hands off", agentauth.ErrForbidden)
 	// ErrRoomUnavailable reports a target Room that is missing, being
 	// deleted, the direct chat itself, or lacks the AnotherMe or its Human.
@@ -200,9 +200,9 @@ func directChat(ctx context.Context, queries *store.Queries, authorization agent
 }
 
 // requireHumanRequest admits only the Run the request names when it carries
-// a message the Human typed in the direct chat. A proactive wake, Routine,
-// card decision or Task callback runs there too, often on content from
-// outside (mail, events, documents), and must not reach other Rooms.
+// a message the Human wrote, or a card they decided, in the direct chat. A
+// proactive wake, Routine or Task callback runs there too, often on content
+// from outside (mail, events, documents), and must not reach other Rooms.
 func requireHumanRequest(
 	ctx context.Context,
 	queries *store.Queries,

@@ -37,9 +37,11 @@ func TestAgentRoomHandoffWakesAnotherMeInItsHumansRoom(t *testing.T) {
 		t.Fatalf("add Agent to %s: %d %s", otherRoomID, code, body)
 	}
 
-	// A Context runs one Run at a time: a quiet wake's first, then Alice's
-	// typed request. The wake is hidden and authored by Alice too.
-	const requested, woken = "run_handoff_requested", "run_handoff_woken"
+	// A Context runs one Run at a time: a quiet wake's, then the result of a
+	// question card Alice answered, then her typed request. The wake and the
+	// card result are hidden and authored by Alice too; only the card result
+	// carries the context of something she did.
+	const requested, woken, answered = "run_handoff_requested", "run_handoff_woken", "run_handoff_answered"
 	handOff := func(contextID, runID, targetRoomID, invocation string) (int, map[string]any) {
 		t.Helper()
 		return postRoomHandoff(t, env, issued.AccessToken, contextID, runID, map[string]any{
@@ -48,11 +50,30 @@ func TestAgentRoomHandoffWakesAnotherMeInItsHumansRoom(t *testing.T) {
 			"instruction":   "Plan the December offsite with the travel Agents and tell Alice the result.",
 		})
 	}
-	refused := func(name string, code int, want string, contextID, runID, targetRoomID, invocation string) {
+	// A refusal names its reason in an issue the CLI shows the Agent.
+	refused := func(name string, code int, want, reason, contextID, runID, targetRoomID, invocation string) {
 		t.Helper()
 		got, body := handOff(contextID, runID, targetRoomID, invocation)
-		if got != code || agentProfileErrorCode(body) != want {
-			t.Fatalf("%s=%d %v, want %d %s", name, got, body, code, want)
+		envelope, _ := body["error"].(map[string]any)
+		issues, _ := envelope["issues"].([]any)
+		issue := map[string]any{}
+		if len(issues) == 1 {
+			issue, _ = issues[0].(map[string]any)
+		}
+		if got != code || agentProfileErrorCode(body) != want || issue["code"] != reason {
+			t.Fatalf("%s=%d %v, want %d %s %s", name, got, body, code, want, reason)
+		}
+	}
+	endRun := func(runID string) {
+		t.Helper()
+		for _, statement := range []string{
+			`DELETE FROM agent_local_run_inputs WHERE run_id=$1`,
+			`DELETE FROM agent_runtime_inputs WHERE local_run_id=$1`,
+			`DELETE FROM agent_local_runs WHERE run_id=$1`,
+		} {
+			if _, err := env.pool.Exec(t.Context(), statement, runID); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	handoffs := func(roomID string) int {
@@ -60,28 +81,29 @@ func TestAgentRoomHandoffWakesAnotherMeInItsHumansRoom(t *testing.T) {
 			AND body LIKE '%"kind":"room_handoff"%'`, roomID)
 	}
 
-	refused("general Agent", http.StatusForbidden, "operation_forbidden", direct.ID, requested, roomID, "general")
+	refused("general Agent", http.StatusForbidden, "operation_forbidden", "not_direct_chat", direct.ID, requested, roomID, "general")
 	if _, err := env.pool.Exec(t.Context(), `UPDATE agent_registrations SET agent_type='anotherme',represented_human_actor_id='actor_acme_alice' WHERE actor_id='actor_acme_official'`); err != nil {
 		t.Fatal(err)
 	}
-	refused("from a collaboration Room", http.StatusForbidden, "operation_forbidden", otherRoomID, requested, roomID, "collaboration")
-	refused("without a Run", http.StatusForbidden, "operation_forbidden", direct.ID, "", roomID, "no-run")
-	seedDirectChatRun(t, env, direct.ID, woken, "message_handoff_wake", "agent_runtime")
-	refused("in a wake's Run", http.StatusForbidden, "operation_forbidden", direct.ID, woken, roomID, "wake")
-	for _, table := range []string{"agent_local_run_inputs", "agent_runtime_inputs", "agent_local_runs"} {
-		column := "run_id"
-		if table == "agent_runtime_inputs" {
-			column = "local_run_id"
-		}
-		if _, err := env.pool.Exec(t.Context(), `DELETE FROM `+table+` WHERE `+column+`=$1`, woken); err != nil {
-			t.Fatal(err)
-		}
-	}
-	seedDirectChatRun(t, env, direct.ID, requested, "message_handoff_request", "conversation")
-	refused("in a Run of another Room", http.StatusForbidden, "operation_forbidden", otherRoomID, requested, roomID, "other-run")
-	refused("to a Room without the Human", http.StatusForbidden, "forbidden", direct.ID, requested, withoutAliceID, "without-alice")
-	refused("to the direct chat", http.StatusForbidden, "forbidden", direct.ID, requested, direct.ID, "direct")
+	refused("from a collaboration Room", http.StatusForbidden, "operation_forbidden", "not_direct_chat", otherRoomID, requested, roomID, "collaboration")
+	refused("without a Run", http.StatusForbidden, "operation_forbidden", "not_requested_by_human", direct.ID, "", roomID, "no-run")
+	seedDirectChatRun(t, env, direct.ID, woken, "message_handoff_wake", "agent_runtime", false)
+	refused("in a wake's Run", http.StatusForbidden, "operation_forbidden", "not_requested_by_human", direct.ID, woken, roomID, "wake")
+	endRun(woken)
 	if n := handoffs(roomID) + handoffs(withoutAliceID) + handoffs(direct.ID); n != 0 {
+		t.Fatalf("refused handoffs persisted: %d", n)
+	}
+
+	seedDirectChatRun(t, env, direct.ID, answered, "message_handoff_answer", "agent_runtime", true)
+	if code, body := handOff(direct.ID, answered, roomID, "answered"); code != http.StatusOK || body["accepted"] != true {
+		t.Fatalf("handoff after Alice answered a card=%d %v", code, body)
+	}
+	endRun(answered)
+	seedDirectChatRun(t, env, direct.ID, requested, "message_handoff_request", "conversation", false)
+	refused("in a Run of another Room", http.StatusForbidden, "operation_forbidden", "not_direct_chat", otherRoomID, requested, roomID, "other-run")
+	refused("to a Room without the Human", http.StatusForbidden, "forbidden", "room_unavailable", direct.ID, requested, withoutAliceID, "without-alice")
+	refused("to the direct chat", http.StatusForbidden, "forbidden", "room_unavailable", direct.ID, requested, direct.ID, "direct")
+	if n := handoffs(withoutAliceID) + handoffs(direct.ID); n != 0 {
 		t.Fatalf("refused handoffs persisted: %d", n)
 	}
 
@@ -104,8 +126,8 @@ func TestAgentRoomHandoffWakesAnotherMeInItsHumansRoom(t *testing.T) {
 		!strings.Contains(text, "Plan the December offsite") || !strings.Contains(text, `"origin_room_id":"`+direct.ID+`"`) {
 		t.Fatalf("handoff author=%s mentioned=%v body=%s", author, mentioned, text)
 	}
-	if n := handoffs(roomID); n != 1 {
-		t.Fatalf("handoffs in the Human's Room=%d, want 1", n)
+	if n := handoffs(roomID); n != 2 {
+		t.Fatalf("handoffs in the Human's Room=%d, want 2", n)
 	}
 	// The hidden handoff wakes the AnotherMe's Context in that Room.
 	disposition := func(agentActorID string) string {
@@ -126,8 +148,8 @@ func TestAgentRoomHandoffWakesAnotherMeInItsHumansRoom(t *testing.T) {
 
 // seedDirectChatRun records a running Run of the fixture Agent's Context in
 // the direct chat whose initial input carries one new message of the given
-// kind from Alice.
-func seedDirectChatRun(t *testing.T, env *testEnv, directID, runID, messageID, kind string) {
+// kind from Alice; with cardResult it is the result of a card the Agent posted.
+func seedDirectChatRun(t *testing.T, env *testEnv, directID, runID, messageID, kind string, cardResult bool) {
 	t.Helper()
 	ensured, err := agentruntimestate.New(env.pool).EnsureContext(t.Context(), agentruntimestate.EnsureContextInput{TargetResidency: "active",
 		Ref: agentruntimestate.ContextRef{Kind: "meta", AgentID: acmeOfficialAgentManagementID, RoomID: directID},
@@ -136,13 +158,22 @@ func seedDirectChatRun(t *testing.T, env *testEnv, directID, runID, messageID, k
 		t.Fatalf("ensure Context: %v", err)
 	}
 	key := ensured.Context.ContextKey
+	cardID := ""
+	if cardResult {
+		cardID = messageID + "_card"
+		if _, err := env.pool.Exec(t.Context(), `INSERT INTO messages(id,tenant_id,room_id,author_actor_id,body,segments,message_kind)
+			VALUES($1,$2,$3,'actor_acme_official','Where should we go?','[{"type":"text","content":"Where should we go?"}]'::jsonb,'conversation')`,
+			cardID, acmeTenant, directID); err != nil {
+			t.Fatalf("seed card %s: %v", cardID, err)
+		}
+	}
 	for _, statement := range []struct {
 		query string
 		args  []any
 	}{
-		{`INSERT INTO messages(id,tenant_id,room_id,author_actor_id,body,segments,message_kind)
-			VALUES($1,$2,$3,'actor_acme_alice','Please plan it','[{"type":"text","content":"Please plan it"}]'::jsonb,$4)`,
-			[]any{messageID, acmeTenant, directID, kind}},
+		{`INSERT INTO messages(id,tenant_id,room_id,author_actor_id,body,segments,message_kind,card_context_message_id)
+			VALUES($1,$2,$3,'actor_acme_alice','Please plan it','[{"type":"text","content":"Please plan it"}]'::jsonb,$4,NULLIF($5,''))`,
+			[]any{messageID, acmeTenant, directID, kind, cardID}},
 		{`INSERT INTO agent_local_runs(run_id,context_key,status,started_at,status_room_id) VALUES($1,$2,'running',clock_timestamp(),$3)`,
 			[]any{runID, key, directID}},
 		{`INSERT INTO agent_runtime_inputs(context_key,input_id,input_sequence,payload,payload_hash,source_kind,source_message_id,source_inbox_id,status,local_run_id)

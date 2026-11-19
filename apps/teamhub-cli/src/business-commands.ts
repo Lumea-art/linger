@@ -855,7 +855,7 @@ const roomHandoff = definition(
     unavailableInTask:
       "A Task cannot hand off work. Say in your final reply which Room should take it; the Meta that started the Task can hand it off.",
     notes: [
-      "Only Another Me, from its direct chat with its Human, in a turn the Human's own message started.",
+      "Only Another Me, from its direct chat with its Human, in a turn the Human started by writing to it or deciding one of its cards.",
       "The instruction is hidden from that Room. You there are woken with it, read that Room, and post and @ the Agents yourself; the direct chat's messages are not copied.",
       "Results come back to the direct chat through teamhub message direct.",
     ],
