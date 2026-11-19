@@ -97,18 +97,30 @@ build:assets` to check the initial JS budget.
   must not trigger repeated hover enter/leave; sidebar expansion and Chat list
   collapse remain explicit button actions. Pointer movement only resizes during
   an active drag; keyboard resizing and double-click reset remain available.
+- Opening Meeting from the sidebar requests the initial picture-in-picture
+  size so a new expanded recording cannot inherit the browser's cached
+  minimized window bounds. Floating an existing in-page recording keeps the
+  browser's usual placement behavior.
 - Recording picture-in-picture collapse remembers that window's actual
   expanded outer dimensions and restores both dimensions with an absolute
   resize inside the user's click, bounded by the current screen. A pending
   native resize must not replace the saved expanded size with collapsed
   metrics. Collapse never closes the window or stops the recording; native
-  window placement remains under browser control.
+  window placement remains under browser control. Stop preserves the current
+  recording view and window dimensions. A minimized window, in the page
+  (including the desktop app) or picture-in-picture, shows the confirmation
+  actions side by side within its control row, so they stay on screen wherever
+  the row sits; an open window keeps the vertical confirmation card.
 - Recording and Voice Mode distinguish the native window's close action from
   back to tab through the shared PiP return detection. Back to tab keeps the
   session running in the page and exposes a Float action; close ends it.
   Recording moves one portal host between documents so paused state, Ask
   drafts and transcript scroll survive the move. Hide it while classifying a
   native close, and ignore a late result after unmount or a replacement window.
+- Pausing a recording mutes the shared microphone for that recording only:
+  the microphone track can outlive it, so a new recording turns the
+  microphone back on before it starts, and Start on a running paused
+  recording keeps it paused.
 - Gmail and Outlook message approvals show the subject and recipients once.
   The subject row toggles the preview and owns its hover highlight; the
   recipient line stays outside the control. The shared AutoHeight transition

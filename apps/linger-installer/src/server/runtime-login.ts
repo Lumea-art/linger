@@ -42,19 +42,24 @@ function allowedCodexUrl(url: URL, nativeBrowser: boolean) {
 /** Native output is private and ephemeral. Never attach it to persisted jobs or logs. */
 export class RuntimeLoginManager {
   private sessions = new Map<string, Session>();
+  private starting = new Map<string, AbortController>();
+  private closed = false;
   constructor(
     private inspect: typeof inspectRuntime = inspectRuntime,
     private platform: NodeJS.Platform = process.platform,
   ) {}
-  private async probe(input: Input) {
+  private async probe(input: Input, signal?: AbortSignal) {
     const env = {
       ...process.env,
       ...(await managedRuntimeEnvironment(input.home, input.root)),
     };
+    signal?.throwIfAborted();
     const state = await this.inspect(input.runtime, {
       home: input.home,
       env,
-      signal: AbortSignal.timeout(15000),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(15000)])
+        : AbortSignal.timeout(15000),
     });
     return { env, state };
   }
@@ -81,7 +86,23 @@ export class RuntimeLoginManager {
       session.child.stdin.write(code + "\n");
       return structuredClone(session.snapshot);
     }
-    const { env, state } = await this.probe(input);
+    if (this.closed) return { state: "idle" };
+    this.starting.get(input.instance)?.abort();
+    const controller = new AbortController();
+    this.starting.set(input.instance, controller);
+    let result;
+    try {
+      result = await this.probe(input, controller.signal);
+    } catch (error) {
+      if (this.starting.get(input.instance) === controller)
+        this.starting.delete(input.instance);
+      if (controller.signal.aborted) return { state: "idle" };
+      throw error;
+    }
+    if (this.starting.get(input.instance) !== controller)
+      return { state: "idle" };
+    this.starting.delete(input.instance);
+    const { env, state } = result;
     if (state.ready) return { state: "ready" };
     const existing = this.sessions.get(input.instance);
     if (
@@ -191,6 +212,8 @@ export class RuntimeLoginManager {
   }
   /** Stops a login this manager started, such as when the person cancels it. */
   cancel(instance: string): Snapshot {
+    this.starting.get(instance)?.abort();
+    this.starting.delete(instance);
     this.stop(instance);
     return { state: "idle" };
   }
@@ -211,6 +234,9 @@ export class RuntimeLoginManager {
     this.sessions.delete(instance);
   }
   close() {
+    this.closed = true;
+    for (const controller of this.starting.values()) controller.abort();
+    this.starting.clear();
     for (const name of this.sessions.keys()) this.stop(name);
   }
 }

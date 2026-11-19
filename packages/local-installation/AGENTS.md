@@ -35,6 +35,10 @@ voice key; without them, or when they fail to prepare, TeamHub gets
 `TEAMHUB_VOICE_MEDIA=off` and the install continues. The services' `voice`
 setting tracks only the tools, so a key change never restarts them through
 it. A native process restarts when its generated environment changes.
+Generated native values preserve quoted paths and literal backslashes by
+checking their complete dotenv file with the launcher's parser. Multiline,
+NUL-containing or otherwise unrepresentable values fail before publishing
+the environment file.
 Every port the installer chooses (`ports.ts`) must be free on both
 127.0.0.1 and ::1 with nothing answering there: `localhost` resolves to ::1
 first on macOS, and a program on ::1 alone would answer for a service that
@@ -179,8 +183,10 @@ leave PostgreSQL holding `postmaster.pid` against every retry.
 Every download offered by both a global host and a mainland-China mirror
 goes through `downloadInRegion` (`region.ts`), which tries the home's
 download region first and never drops a source; the region is
-`SIMPLEX_REGION`, else `<home>/runtime/region.json` (7 days), else the npm
-registry probe, and a fallback to the other region rewrites the file. The
+`SIMPLEX_REGION`, else `<home>/runtime/region.json` (24 hours), else a
+best-of-three npm registry probe (up to 1 MiB per round, fastest wins). When
+the preferred region fails or transfers slowly while a mirror in the other
+region proves faster, the transfer resumes there and rewrites the file. The
 resolved region reaches every `localmodels` child and native service as
 `SIMPLEX_REGION`. The contract is in `scripts/installs/README.md`.
 
@@ -188,6 +194,9 @@ Verified downloads stop reading on explicit cancellation even when a response
 body ignores the fetch signal. They retain the caller's abort reason, cancel
 the reader and keep only resumable partial bytes; cancellation never waits
 for the idle timeout or moves on to another mirror.
+Rebuilding the checksum of a saved resumable partial also uses the caller's
+signal, so cancellation stops local reads before another request starts and
+leaves the partial file intact for the next attempt.
 
 Move a freshly downloaded or unpacked file or folder into place with
 `renameRetrying` from `fs-retry.ts`: on Windows antivirus and indexing hold

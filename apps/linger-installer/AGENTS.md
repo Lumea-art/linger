@@ -10,6 +10,9 @@ Only the authorized no-store login endpoint and explicit credentials view may
 show the user's password; redact events, diagnostics and persisted job snapshots.
 Browser closure never cancels installation. Repeated launches reuse the manager,
 instance mutations remain locked, and cancellation retains account/data/device.
+Native sign-in cancellation and manager shutdown invalidate pending runtime
+inspections before they can launch a login process; a newer explicit start owns
+the instance's pending inspection.
 A start returns the instance's running or queued job; a job that finished its
 run and waits for the person (`waiting_user`, e.g. `LOCAL_MODELS_UNAVAILABLE`)
 is canceled and replaced, so Try Again checks the computer again.
