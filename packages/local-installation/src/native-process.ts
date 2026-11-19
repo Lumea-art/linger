@@ -577,28 +577,34 @@ function terminate(pid: number) {
 export function windowsTerminationOrder(tree: WindowsProcess[]): number[] {
   return tree.map((candidate) => candidate.pid).reverse();
 }
-function windowsTreeForStop(
+async function windowsStopSnapshot(
   name: NativeService,
-  snapshot: WindowsProcess[],
   lease: string,
   record?: Pick<Lease, "pid" | "birth">,
-): WindowsProcess[] {
-  const tree = windowsLeaseTree(snapshot, lease);
-  if (
-    record &&
-    tree[0]?.pid !== record.pid &&
-    snapshot.some(
-      ({ pid, created }) =>
-        pid === record.pid && `win32:${pid}:${created}` === record.birth,
-    )
-  ) {
-    // A live recorded supervisor without its lease may still be serving.
-    // Neither signal it nor discard the record and start a replacement.
+): Promise<{ snapshot: WindowsProcess[]; tree: WindowsProcess[] }> {
+  const read = async () => {
+    const snapshot = (await windowsSnapshot()).processes;
+    const tree = windowsLeaseTree(snapshot, lease);
+    const unverified =
+      record && tree[0]?.pid !== record.pid
+        ? snapshot.find(
+            ({ pid, created }) =>
+              pid === record.pid && `win32:${pid}:${created}` === record.birth,
+          )
+        : undefined;
+    return { snapshot, tree, unverified };
+  };
+  let current = await read();
+  // If a process exits during CIM enumeration, its PID and birth can still
+  // appear in that snapshot even though its command line could not be read.
+  // A fresh snapshot distinguishes that from a live, unverifiable process.
+  if (current.unverified?.command === "") current = await read();
+  if (current.unverified) {
     throw new Error(
       `Native ${name} process identity cannot be verified; identity record retained.`,
     );
   }
-  return tree;
+  return current;
 }
 
 /**
@@ -617,8 +623,7 @@ async function stopWindowsTree(
 ) {
   const deadline = Date.now() + 12_000;
   for (;;) {
-    const snapshot = (await windowsSnapshot()).processes;
-    const tree = windowsTreeForStop(name, snapshot, lease, record);
+    const { snapshot, tree } = await windowsStopSnapshot(name, lease, record);
     if (!tree.length) return;
     if (Date.now() >= deadline) {
       if (record && (await endRecordedTree(name, record, snapshot))) return;
@@ -656,12 +661,7 @@ async function endRecordedTree(
   }).catch(() => undefined);
   const deadline = Date.now() + 3_000;
   for (;;) {
-    const tree = windowsTreeForStop(
-      name,
-      (await windowsSnapshot()).processes,
-      record.lease,
-      record,
-    );
+    const { tree } = await windowsStopSnapshot(name, record.lease, record);
     if (!tree.length) return true;
     if (Date.now() >= deadline) return false;
     await delay(100);

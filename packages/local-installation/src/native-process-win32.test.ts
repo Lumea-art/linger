@@ -12,6 +12,7 @@ import type {
 // object ends along with it) from the next snapshot.
 const host = vi.hoisted(() => ({
   processes: [] as WindowsProcess[],
+  exiting: [] as WindowsProcess[],
   listeners: new Map<number, number>(),
   ended: [] as number[],
   cascade: new Map<number, number[]>(),
@@ -20,7 +21,7 @@ vi.mock("./native-process-identity.js", async (original) => {
   const actual =
     await original<typeof import("./native-process-identity.js")>();
   const snapshot = async (): Promise<WindowsSnapshot> => ({
-    processes: [...host.processes],
+    processes: [...host.processes, ...host.exiting.splice(0)],
     listeners: new Map(host.listeners),
   });
   return {
@@ -68,6 +69,7 @@ beforeEach(async () => {
   Object.defineProperty(process, "platform", { ...platform, value: "win32" });
   root = await mkdtemp(path.join(tmpdir(), "native-win32-"));
   host.processes = [row(1, 0, 1, "wininit.exe")];
+  host.exiting = [];
   host.listeners = new Map();
   host.ended = [];
   host.cascade = new Map();
@@ -165,6 +167,23 @@ test.each([
     await expect(readFile(file, "utf8")).resolves.toBe(original);
   },
 );
+
+test("stop verifies that an exiting supervisor's incomplete CIM row disappears", async () => {
+  await record("web", 10);
+  const supervisor = worker(10, "web");
+  host.processes.push(supervisor);
+  vi.mocked(process.kill).mockImplementationOnce((pid) => {
+    host.ended.push(pid);
+    host.processes = host.processes.filter((entry) => entry.pid !== pid);
+    host.exiting.push({ ...supervisor, command: "" });
+    return true;
+  });
+
+  await stopNativeProcess(root, "web");
+  expect(host.ended).toEqual([10]);
+  expect(taskkill.calls).toEqual([]);
+  expect((await inspectNativeProcess(root, "web")).pid).toBeUndefined();
+});
 
 test("stop forgets a record whose PID Windows gave to another program", async () => {
   await record("web", 10);

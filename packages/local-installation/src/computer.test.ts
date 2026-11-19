@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import * as processes from "./process.js";
+import * as windowsPrivacy from "./windows-private.js";
 import { writeSetupChoice } from "./setup-selection.js";
 import { initializeInstance } from "./instance.js";
 import {
@@ -517,6 +518,10 @@ it("reports the actual Gateway connection separately when disconnected", async (
 });
 
 it("refreshes an idle instance after a private runtime is installed and preserves its identity", async () => {
+  // This test exercises the refresh and credential-binding logic through a
+  // mocked CLI. Keep real ACL coverage in the Windows private-state tests.
+  if (process.platform === "win32")
+    vi.spyOn(windowsPrivacy, "windowsPrivatePath").mockResolvedValue();
   const f = await fixture();
   const personalAuth = path.join(f.instance.root, "personal-auth.json");
   await writeFile(personalAuth, "unchanged-personal-credentials", {
