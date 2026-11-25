@@ -20,7 +20,15 @@ import {
   type LocalServerIdentity,
 } from "./local-server.js";
 import { EventBus, ModuleHost } from "./modules.js";
-import { fixtureNode, stubModule, tempDirectory } from "./test-support.js";
+import {
+  fixtureNode,
+  stubModule,
+  tempDirectory,
+  waitForInstaller,
+} from "./test-support.js";
+
+// These tests run the installer stub in real subprocesses.
+if (process.platform === "win32") vi.setConfig({ testTimeout: 20_000 });
 
 async function writeDesktopInstance(home: string, port: number): Promise<void> {
   const root = instanceRoot({ name: "desktop", home });
@@ -180,7 +188,7 @@ describe("LocalServerModule resume coordination", () => {
 
     await f.host.start();
 
-    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
     expect(f.showStarting).toHaveBeenCalledOnce();
     expect(f.setServer).toHaveBeenCalledWith(
       "http://localhost:3000",
@@ -225,7 +233,9 @@ describe("LocalServerModule resume coordination", () => {
       );
       try {
         await f.host.start();
-        await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+        await waitForInstaller(() =>
+          expect(f.module.status().phase).toBe("ready"),
+        );
         expect(resolveProxy).toHaveBeenCalledWith(
           "wss://stt-rt.soniox.com/transcribe-websocket",
         );
@@ -274,7 +284,7 @@ describe("LocalServerModule resume coordination", () => {
 
     await f.host.start();
 
-    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
     expect(f.showStartFailed).not.toHaveBeenCalled();
     expect(f.module.status().localModelsDegraded).toBeUndefined();
     expect(
@@ -296,7 +306,7 @@ describe("LocalServerModule resume coordination", () => {
 
     await f.host.start();
 
-    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
     expect(f.showStartFailed).not.toHaveBeenCalled();
     expect(f.module.status().localModelsDegraded).toEqual({
       code: "LOCAL_MODELS_RECOVERY_REQUIRED",
@@ -329,7 +339,9 @@ describe("LocalServerModule resume coordination", () => {
     `);
 
     await f.host.start();
-    await vi.waitFor(() => expect(f.module.status().phase).toBe("failed"));
+    await waitForInstaller(() =>
+      expect(f.module.status().phase).toBe("failed"),
+    );
 
     const failed = f.logs.find(
       (entry) => entry.event === "local_server.resume_failed",
@@ -362,7 +374,7 @@ describe("LocalServerModule resume coordination", () => {
       false,
     );
 
-    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
     await expect(
       f.module.resumable("http://localhost:3000/rooms/1"),
     ).resolves.toBe(true);
@@ -509,7 +521,7 @@ describe("LocalServerModule resume coordination", () => {
     await writeDesktopInstance(f.home, 63009);
 
     await f.host.start();
-    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
     expect(proved).toEqual([
       expect.objectContaining({ origin: "http://localhost:63009" }),
     ]);
@@ -557,7 +569,7 @@ describe("LocalServerModule resume coordination", () => {
     await writeDesktopInstance(f.home, 63009);
 
     await f.host.start();
-    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
     expect(f.showStarting).toHaveBeenCalledOnce();
     expect(f.setServer).toHaveBeenCalledExactlyOnceWith(
       "http://localhost:63011",
@@ -582,7 +594,7 @@ describe("LocalServerModule resume coordination", () => {
     await expect(f.module.isStarting("http://localhost:3000")).resolves.toBe(
       true,
     );
-    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
     await expect(f.module.isStarting("http://localhost:3000")).resolves.toBe(
       false,
     );
@@ -626,12 +638,16 @@ describe("LocalServerModule resume coordination", () => {
       const server = answering();
       const f = setupResumeFixture(counting, { fetch: server.fetch });
       await f.host.start();
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
       expect(runs(f)).toBe(1);
       server.state.up = false;
       f.bus.emit("local-server.retry");
-      await vi.waitFor(() => expect(runs(f)).toBe(2));
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await waitForInstaller(() => expect(runs(f)).toBe(2));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
       expect(recoveries(f)).toEqual([{ trigger: "retry" }]);
       expect(f.showStarting).toHaveBeenCalledOnce();
       await f.host.stop("quit");
@@ -641,7 +657,9 @@ describe("LocalServerModule resume coordination", () => {
       const server = answering();
       const f = setupResumeFixture(counting, { fetch: server.fetch });
       await f.host.start();
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
       f.bus.emit("local-server.retry");
       await new Promise((resolve) => setTimeout(resolve, 200));
       expect(runs(f)).toBe(1);
@@ -656,17 +674,21 @@ describe("LocalServerModule resume coordination", () => {
         unreachableGraceMs: 100,
       });
       await f.host.start();
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
       server.state.up = false;
       f.bus.emit("local-server.unreachable");
       // Further failed loads while it waits change nothing.
       f.bus.emit("local-server.unreachable");
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(runs(f)).toBe(1);
-      await vi.waitFor(() => expect(runs(f)).toBe(2));
+      await waitForInstaller(() => expect(runs(f)).toBe(2));
       // Three checks in a row went unanswered, then the resume's own one.
       expect(server.state.unanswered).toBeGreaterThanOrEqual(4);
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
       expect(recoveries(f)).toEqual([{ trigger: "load_failed" }]);
       await f.host.stop("quit");
     });
@@ -678,7 +700,9 @@ describe("LocalServerModule resume coordination", () => {
         unreachableGraceMs: 150,
       });
       await f.host.start();
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
       server.state.up = false;
       f.bus.emit("local-server.unreachable");
       setTimeout(() => {
@@ -698,11 +722,13 @@ describe("LocalServerModule resume coordination", () => {
         unreachableGraceMs: 30,
       });
       await f.host.start();
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
       await new Promise((resolve) => setTimeout(resolve, 150));
       expect(runs(f)).toBe(1);
       server.state.up = false;
-      await vi.waitFor(() => expect(runs(f)).toBe(2));
+      await waitForInstaller(() => expect(runs(f)).toBe(2));
       await new Promise((resolve) => setTimeout(resolve, 400));
       expect(runs(f)).toBe(2);
       expect(recoveries(f)).toEqual([{ trigger: "watch" }]);
@@ -760,7 +786,9 @@ describe("LocalServerModule resume coordination", () => {
         unreachableGraceMs: 60,
       });
       await f.host.start();
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
       // Two of the three checks go unanswered, the last one answers.
       misses = 2;
       f.bus.emit("local-server.unreachable");
@@ -779,7 +807,9 @@ describe("LocalServerModule resume coordination", () => {
         unreachableGraceMs: 100,
       });
       await f.host.start();
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
       server.state.up = false;
       f.bus.emit("local-server.unreachable");
       await f.host.stop("quit");
