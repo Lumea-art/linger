@@ -1038,7 +1038,7 @@ export interface ProviderPrepareRunContext {
   stop_hook?: boolean;
 }
 /**
- * Compacts the native session of the process parked for this Context with the Runtime's own compaction. It never starts a process; without a parked process the answer is no_process.
+ * Compacts the native session of the process parked for this Context with the Runtime's own compaction. It never starts a process; without a parked process the answer is no_process. Pi compaction is sent only to a Computer release that decodes it.
  */
 export interface SessionCompact {
   type: "execute";
@@ -1048,7 +1048,7 @@ export interface SessionCompact {
   runner_id: Id;
   connection_epoch: PositiveInteger;
   agent_id: Id;
-  runtime_type: "codex" | "claude";
+  runtime_type: "codex" | "claude" | "pi";
   execution_context_key: ExecutionContextKey;
   instructions?: string;
   kind: "session_compact";
